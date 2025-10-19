@@ -207,10 +207,15 @@ app.layout = html.Div([
 
 
     # Top-10 operas table controls
-    html.H2("Top 10 opere per ARTISTA × ANNO", style={'textAlign': 'center'}),
+    html.H2("Top N opere per ARTISTA × ANNO", style={'textAlign': 'center'}),
     html.Div([
-        dcc.Dropdown(id='top10-artist-filter', placeholder='Filtro ARTISTA (opzionale)', multi=False, style={'width': '45%', 'display': 'inline-block', 'marginRight': '10px'}),
-        dcc.Dropdown(id='top10-year-filter', placeholder='Filtro ANNO (opzionale)', multi=False, style={'width': '30%', 'display': 'inline-block'}),
+        html.Label('Scegli Artista:'),
+        dcc.Dropdown(id='top10-artist-filter', placeholder='Filtro ARTISTA (opzionale)', multi=False, style={'width': '30%', 'display': 'inline-block', 'marginRight': '10px'}),
+        html.Label('Scegli Anno:'),
+        dcc.Dropdown(id='top10-year-filter', placeholder='Filtro ANNO (opzionale)', multi=False, style={'width': '30%', 'display': 'inline-block', 'marginRight': '10px'}),
+        html.Label('N:'),
+        # numeric input for Top-N
+        dcc.Input(id='top10-n', type='number', min=1, step=1, value=10, placeholder='N', style={'width': '8%', 'display': 'inline-block'}),
     ], style={'width': '90%', 'margin': 'auto', 'marginTop': 10}),
     html.Div(id='top10-table-container', style={'width': '90%', 'margin': 'auto', 'marginTop': 10}),
 
@@ -246,14 +251,13 @@ from graphs.table_top10 import top10_long, dash_table_from_df
      Output('top10-artist-filter', 'value'), Output('top10-year-filter', 'value')],
     Input('url', 'href')
 )
-def fill_top10_filters(_href):
+def fill_top10_filters(_href, df=df):
     """Populate artist/year options and set default selections.
 
     Default artist: 'Dalì' if present, otherwise first artist or None.
     Default year: '2025' if present, otherwise first year or None.
     """
-    df = leggi_dati()
-    if df.empty:
+    if df is None or df.empty:
         return [], [], None, None
 
     artists = sorted(df['ARTISTA'].dropna().astype(str).unique())
@@ -261,6 +265,9 @@ def fill_top10_filters(_href):
 
     artist_options = [{'label': a, 'value': a} for a in artists]
     year_options = [{'label': y, 'value': y} for y in years]
+
+    artist_options.append({'label': 'Tutti', 'value': 'Tutti'})
+    year_options.append({'label': 'Tutti', 'value': 'Tutti'})
 
     # preferred defaults
     preferred_artist = 'Dalì'
@@ -273,17 +280,32 @@ def fill_top10_filters(_href):
 
 
 @app.callback(Output('top10-table-container', 'children'),
-              [Input('url', 'href'), Input('top10-artist-filter', 'value'), Input('top10-year-filter', 'value')])
-def update_top10_table(_href, artist, anno):
-    df = leggi_dati()
-    if df.empty:
+              [Input('url', 'href'), Input('top10-artist-filter', 'value'), Input('top10-year-filter', 'value'), Input('top10-n', 'value')])
+def update_top10_table(_href, artist, anno, top_n, df=df):
+    if df is None or df.empty:
         return html.Div("Nessun dato disponibile")
-    if artist:
-        df = df[df['ARTISTA'].astype(str) == str(artist)]
-    if anno:
-        df = df[df['ANNO'].astype(str) == str(anno)]
-    top10 = top10_long(df)
-    return dash_table_from_df(top10)
+
+    try:
+        # validate top_n
+        try:
+            n = int(top_n)
+            if n < 1:
+                n = 10
+        except Exception:
+            n = 10
+
+        # Delegate filtering and 'Tutti' handling to top10_long which understands
+        # artist/anno == 'Tutti' (or None) as include-all.
+        top10 = top10_long(df, artist=artist, anno=anno, top_n=n)
+        return dash_table_from_df(top10)
+    except Exception as e:
+        # capture full traceback and show it in the page to help debugging
+        import traceback
+        tb = traceback.format_exc()
+        return html.Div([
+            html.H4("Errore durante il calcolo della Top-N:"),
+            html.Pre(tb)
+        ])
 
 # 🔹 Callback per aggiornare le opzioni delle dropdown
 @app.callback(
@@ -297,8 +319,7 @@ def update_top10_table(_href, artist, anno):
     State('colonna-y', 'value')
 )
 def aggiorna_opzioni(_href, current_x, current_y):
-    df = leggi_dati()
-    if df.empty:
+    if df is None or df.empty:
         return [], [], [], None, None
 
     cols = list(df.columns)
@@ -323,8 +344,7 @@ def aggiorna_opzioni(_href, current_x, current_y):
      Input('colonna-colore', 'value')]
 )
 def aggiorna_grafico(col_x, col_y, col_colore):
-    df = leggi_dati()
-    if df.empty or not col_x or not col_y:
+    if df is None or df.empty or not col_x or not col_y:
         return px.scatter(title="In attesa di dati..."), "⏳ Nessun dato disponibile"
 
     fig = px.scatter(df, x=col_x, y=col_y, color=col_colore,
@@ -337,4 +357,4 @@ def aggiorna_grafico(col_x, col_y, col_colore):
 # 🔹 Avvio app
 if __name__ == "__main__":
     print("🚀 Avvio server Dash su http://0.0.0.0:10000 ...")
-    app.run (host="0.0.0.0", port=10000)
+    app.run (host="0.0.0.0", port=10000, debug=True)
