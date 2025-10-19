@@ -1,6 +1,6 @@
 import pandas as pd
 import plotly.express as px
-from dash import Dash, dcc, html, Input, Output
+from dash import Dash, dcc, html, Input, Output, State
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import threading
@@ -82,16 +82,26 @@ app.layout = html.Div([
      Output('colonna-colore', 'options'),
      Output('colonna-x', 'value'),
      Output('colonna-y', 'value')],
-    Input('aggiorna', 'n_intervals')
+    Input('aggiorna', 'n_intervals'),
+    State('colonna-x', 'value'),
+    State('colonna-y', 'value')
 )
-def aggiorna_opzioni(_):
+def aggiorna_opzioni(_intervals, current_x, current_y):
     df = leggi_dati()
     if df.empty:
         return [], [], [], None, None
 
-    opzioni = [{'label': c, 'value': c} for c in df.columns]
-    col_x = df.columns[0] if len(df.columns) > 0 else None
-    col_y = df.columns[1] if len(df.columns) > 1 else None
+    cols = list(df.columns)
+    opzioni = [{'label': c, 'value': c} for c in cols]
+
+    # determine defaults
+    default_x = cols[0] if len(cols) > 0 else None
+    default_y = cols[1] if len(cols) > 1 else (cols[0] if len(cols) > 0 else None)
+
+    # preserve current selection if still available, otherwise fall back to defaults
+    col_x = current_x if (current_x in cols) else default_x
+    col_y = current_y if (current_y in cols) else default_y
+
     return opzioni, opzioni, opzioni, col_x, col_y
 
 # 🔹 Callback per generare il grafico
@@ -136,5 +146,5 @@ def avvia_watcher():
 # 🔹 Avvio app
 if __name__ == "__main__":
     threading.Thread(target=avvia_watcher, daemon=True).start()
-    print("🚀 Avvio server Dash su http://127.0.0.1:8050 ...")
-    app.run (debug=True)
+    print("🚀 Avvio server Dash su http://0.0.0.0:10000 ...")
+    app.run (host="0.0.0.0", port=10000, debug=True)
