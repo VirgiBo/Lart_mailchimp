@@ -9,12 +9,7 @@ def bar_fascia_stato(_href, df=None):
     if df is None or df.empty:
         fig = px.bar(title='Nessun dato disponibile')
         return fig
-
-    # Clean up FASCIA PREZZO values
-    df['FASCIA PREZZO'] = df['FASCIA PREZZO'].str.replace('1500 < X < 5000 €', '1500 - 5000', regex=True)
-    df['FASCIA PREZZO'] = df['FASCIA PREZZO'].str.replace('> 5000 €', '> 5000', regex=True)
-    df['FASCIA PREZZO'] = df['FASCIA PREZZO'].str.replace('< 1500 €', '< 1500', regex=True)
-
+    
     # Drop FASCIA PREZZO rows that are NaN or empty
     df = df[df['FASCIA PREZZO'].notna() & (df['FASCIA PREZZO'].str.strip() != '')]
 
