@@ -357,4 +357,4 @@ def aggiorna_grafico(col_x, col_y, col_colore):
 # 🔹 Avvio app
 if __name__ == "__main__":
     print("🚀 Avvio server Dash su http://0.0.0.0:10000 ...")
-    app.run (host="0.0.0.0", port=10000, debug=True)
+    app.run (host="0.0.0.0", port=10000)
