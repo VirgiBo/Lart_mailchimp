@@ -110,6 +110,15 @@ def leggi_dati():
                 return x
         combined['IVA'] = combined['IVA'].apply(round_if_float)
 
+        #round year
+        def clean_year(x):
+            try:
+                return str(int(float(x)))
+            except:
+                return x
+
+        combined['ANNO'] = combined['ANNO'].apply(clean_year)
+
         return combined
     
     except Exception as e:
@@ -117,7 +126,7 @@ def leggi_dati():
         return pd.DataFrame()
 
 # 🔹 Crea l'app Dash
-app = Dash(__name__)
+app = Dash(__name__, suppress_callback_exceptions=True)
 app.title = "Analisi Dati in Tempo Reale"
 
 # ensure Flask session secret is set (avoids: "Session is not available. Have you set a secret key?")
@@ -171,12 +180,19 @@ app.layout = html.Div([
 
     # selectable category bar chart (ARTISTA / IVA / FASCIA PREZZO)
     html.Div([
+        html.Label('Scegli asse X:'),
+        dcc.Dropdown(id='bar-asse-x-select', options=[
+            {'label': 'ANNO', 'value': 'ANNO'},
+            {'label': 'STATO', 'value': 'STATO'},
+        ], value='ANNO', clearable=False, style={'width': '200px', 'display': 'inline-block', 'marginRight': '12px'}),
+
         html.Label('Scegli categoria:'),
         dcc.Dropdown(id='bar-category-select', options=[
             {'label': 'ARTISTA', 'value': 'ARTISTA'},
             {'label': 'IVA', 'value': 'IVA'},
             {'label': 'FASCIA PREZZO', 'value': 'FASCIA PREZZO'},
-        ], value='ARTISTA', clearable=False, style={'width': '300px'}),
+        ], value='ARTISTA', clearable=False, style={'width': '300px', 'display': 'inline-block'}),
+
         dcc.Graph(id='bar-artista', style={'width': '100%'})
     ], style={'width': '90%', 'margin': 'auto'}),
 
@@ -189,33 +205,14 @@ app.layout = html.Div([
     'margin': '20px auto'
     }),
 
-    # bar chart with built-in Plotly legend
+
+    # Top-10 operas table controls
+    html.H2("Top 10 opere per ARTISTA × ANNO", style={'textAlign': 'center'}),
     html.Div([
-        dcc.Graph(id='bar-fascia-stato', style={'width': '100%'}),
-    ], style={'width': '90%', 'margin': 'auto'}),
-
-    # separation line with spacing
-    html.Hr(style={
-    'height': '2px',
-    'backgroundColor': '#cfcfcf',
-    'border': 'none',
-    'width': '90%',
-    'margin': '20px auto'
-    }),
-
-    #Other Graph
-    html.Div([
-        html.Label("Seleziona Asse X:"),
-        dcc.Dropdown(id='colonna-x', clearable=False),
-
-        html.Label("Seleziona Asse Y:"),
-        dcc.Dropdown(id='colonna-y', clearable=False),
-
-        html.Label("Seleziona Colore (opzionale):"),
-        dcc.Dropdown(id='colonna-colore', clearable=True, placeholder="Nessuno"),
-    ], style={'width': '60%', 'margin': 'auto'}),
-
-    dcc.Graph(id='grafico'),
+        dcc.Dropdown(id='top10-artist-filter', placeholder='Filtro ARTISTA (opzionale)', multi=False, style={'width': '45%', 'display': 'inline-block', 'marginRight': '10px'}),
+        dcc.Dropdown(id='top10-year-filter', placeholder='Filtro ANNO (opzionale)', multi=False, style={'width': '30%', 'display': 'inline-block'}),
+    ], style={'width': '90%', 'margin': 'auto', 'marginTop': 10}),
+    html.Div(id='top10-table-container', style={'width': '90%', 'margin': 'auto', 'marginTop': 10}),
 
     html.Div(id='ultimo-aggiornamento', style={'textAlign': 'center', 'marginTop': 20}),
     # trigger updates on page load / refresh
@@ -224,27 +221,69 @@ app.layout = html.Div([
 
 df = leggi_dati()
 
-from graphs.pie01 import pie_stato
+from graphs.tortaStati import pie_stato
 @app.callback(Output('pie-stato', 'figure'), Input('url', 'href'))
 def update_pie_chart(_href, df=df):
     return pie_stato(_href, df=df)
 
-
-# bar_per_anno is imported later and a single combined callback handles the category selection
-
-from graphs.bar03 import bar_fascia_stato
-@app.callback(Output('bar-fascia-stato', 'figure'), Input('url', 'href'))
-def update_bar_chart(_href, df=df):
-    return bar_fascia_stato(_href, df=df)
-
-from graphs.bar02 import bar_per_anno
+from graphs.barOpzioni import bar_per_anno
 # new chart: selectable category per year (ARTISTA / IVA / FASCIA PREZZO)
-@app.callback(Output('bar-artista', 'figure'), [Input('url', 'href'), Input('bar-category-select', 'value')])
-def update_bar_chart_category(_href, selected_category, df=df):
+@app.callback(Output('bar-artista', 'figure'), [Input('url', 'href'), Input('bar-category-select', 'value'), Input('bar-asse-x-select', 'value')])
+def update_bar_chart_category(_href, selected_category, selected_asse_x, df=df):
     # default fallback
     if not selected_category:
         selected_category = 'ARTISTA'
-    return bar_per_anno(_href, df=df, category_name=selected_category)
+    if not selected_asse_x:
+        selected_asse_x = 'ANNO'
+    return bar_per_anno(_href, df=df, category_name=selected_category, asse_x=selected_asse_x)
+
+
+from graphs.table_top10 import top10_long, dash_table_from_df
+
+
+@app.callback(
+    [Output('top10-artist-filter', 'options'), Output('top10-year-filter', 'options'),
+     Output('top10-artist-filter', 'value'), Output('top10-year-filter', 'value')],
+    Input('url', 'href')
+)
+def fill_top10_filters(_href):
+    """Populate artist/year options and set default selections.
+
+    Default artist: 'Dalì' if present, otherwise first artist or None.
+    Default year: '2025' if present, otherwise first year or None.
+    """
+    df = leggi_dati()
+    if df.empty:
+        return [], [], None, None
+
+    artists = sorted(df['ARTISTA'].dropna().astype(str).unique())
+    years = sorted(df['ANNO'].dropna().astype(str).unique())
+
+    artist_options = [{'label': a, 'value': a} for a in artists]
+    year_options = [{'label': y, 'value': y} for y in years]
+
+    # preferred defaults
+    preferred_artist = 'Dalì'
+    preferred_year = '2025'
+
+    default_artist = preferred_artist if preferred_artist in artists else (artists[0] if artists else None)
+    default_year = preferred_year if preferred_year in years else (years[0] if years else None)
+
+    return artist_options, year_options, default_artist, default_year
+
+
+@app.callback(Output('top10-table-container', 'children'),
+              [Input('url', 'href'), Input('top10-artist-filter', 'value'), Input('top10-year-filter', 'value')])
+def update_top10_table(_href, artist, anno):
+    df = leggi_dati()
+    if df.empty:
+        return html.Div("Nessun dato disponibile")
+    if artist:
+        df = df[df['ARTISTA'].astype(str) == str(artist)]
+    if anno:
+        df = df[df['ANNO'].astype(str) == str(anno)]
+    top10 = top10_long(df)
+    return dash_table_from_df(top10)
 
 # 🔹 Callback per aggiornare le opzioni delle dropdown
 @app.callback(
