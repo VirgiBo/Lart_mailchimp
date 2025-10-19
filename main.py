@@ -169,6 +169,17 @@ app.layout = html.Div([
     'margin': '20px auto'
     }),
 
+    # selectable category bar chart (ARTISTA / IVA / FASCIA PREZZO)
+    html.Div([
+        html.Label('Scegli categoria:'),
+        dcc.Dropdown(id='bar-category-select', options=[
+            {'label': 'ARTISTA', 'value': 'ARTISTA'},
+            {'label': 'IVA', 'value': 'IVA'},
+            {'label': 'FASCIA PREZZO', 'value': 'FASCIA PREZZO'},
+        ], value='ARTISTA', clearable=False, style={'width': '300px'}),
+        dcc.Graph(id='bar-artista', style={'width': '100%'})
+    ], style={'width': '90%', 'margin': 'auto'}),
+
     # separation line with spacing
     html.Hr(style={
     'height': '2px',
@@ -181,17 +192,6 @@ app.layout = html.Div([
     # bar chart with built-in Plotly legend
     html.Div([
         dcc.Graph(id='bar-fascia-stato', style={'width': '100%'}),
-    ], style={'width': '90%', 'margin': 'auto'}),
-
-    # selectable category bar chart (ARTISTA / IVA / FASCIA PREZZO)
-    html.Div([
-        html.Label('Scegli categoria:'),
-        dcc.Dropdown(id='bar-category-select', options=[
-            {'label': 'ARTISTA', 'value': 'ARTISTA'},
-            {'label': 'IVA', 'value': 'IVA'},
-            {'label': 'FASCIA PREZZO', 'value': 'FASCIA PREZZO'},
-        ], value='FASCIA PREZZO', clearable=False, style={'width': '300px'}),
-        dcc.Graph(id='bar-artista', style={'width': '100%'})
     ], style={'width': '90%', 'margin': 'auto'}),
 
     # separation line with spacing
@@ -243,7 +243,7 @@ from graphs.bar02 import bar_per_anno
 def update_bar_chart_category(_href, selected_category, df=df):
     # default fallback
     if not selected_category:
-        selected_category = 'FASCIA PREZZO'
+        selected_category = 'ARTISTA'
     return bar_per_anno(_href, df=df, category_name=selected_category)
 
 # 🔹 Callback per aggiornare le opzioni delle dropdown

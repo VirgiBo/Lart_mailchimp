@@ -75,13 +75,13 @@ def bar_per_anno(_href, category_name='ARTISTA', df=None):
             name=category,
             text=[f"{category} ({int(c)})" if c > 0 else '' for c in y_count],
             textposition='inside',
-            hovertemplate='ANNO: %{customdata[1]}<br>{category_name}: ' + str(category) + '<br>Count: %{customdata[0]}<br>Percent: %{y:.1f}%<extra></extra>',
+            hovertemplate=f'ANNO: %{{customdata[1]}}<br>{category_name}: {category}<br>Count: %{{customdata[0]}}<br>Percent: %{{y:.1f}}%<extra></extra>',
             customdata=custom
         ))
 
     fig = go.Figure(data=traces)
     fig.update_layout(barmode='stack', yaxis=dict(range=[0, 100], title='Percentuale (%)'),
-                      legend_title_text=category, title=f'Distribuzione % {category_name} per ANNO',
+                      legend_title_text=category_name, title=f'Distribuzione % {category_name} per ANNO',
                       template='plotly_white', margin=dict(t=60, b=120))
 
     return fig
