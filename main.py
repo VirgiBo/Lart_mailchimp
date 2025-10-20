@@ -1,19 +1,20 @@
 import pandas as pd
 import plotly.express as px
 from dash import Dash, dcc, html, Input, Output, State
-from watchdog.events import FileSystemEventHandler
-from watchdog.observers import Observer
 from dotenv import load_dotenv  # optional, only if you want .env support
+import requests
 import secrets
 import time
 import os
 import re
 import io
-import requests
 
 
 # load .env (optional)
 load_dotenv()
+
+# APP ENV
+APP_ENV = os.getenv("APP_ENV", "production").lower()
 
 DRIVE_PATH = os.getenv("DRIVE_PATH")
 # Require DRIVE_PATH only (no local fallback)
@@ -94,8 +95,12 @@ def leggi_dati():
 
         combined = pd.concat([df0, df1], ignore_index=True, sort=False)
 
+        # Clean up ARTISTA values
         combined['ARTISTA'] = combined['ARTISTA'].str.strip()
         combined['ARTISTA'] = combined['ARTISTA'].str.replace('Dali', 'Dalì', regex=True)
+
+        # Clean LUOGO DI VENDITA values
+        combined['LUOGO DI VENDITA'] = combined['LUOGO DI VENDITA'].str.strip()
 
         # Clean up FASCIA PREZZO values
         combined['FASCIA PREZZO'] = combined['FASCIA PREZZO'].str.replace('1500 < X < 5000 €', '1500 - 5000', regex=True)
@@ -193,7 +198,7 @@ app.layout = html.Div([
             {'label': 'FASCIA PREZZO', 'value': 'FASCIA PREZZO'},
         ], value='ARTISTA', clearable=False, style={'width': '300px', 'display': 'inline-block'}),
 
-        dcc.Graph(id='bar-artista', style={'width': '100%'})
+    dcc.Graph(id='bar-artista', style={'width': '100%'})
     ], style={'width': '90%', 'margin': 'auto'}),
 
     # separation line with spacing
@@ -221,6 +226,34 @@ app.layout = html.Div([
 
     html.Div(id='ultimo-aggiornamento', style={'textAlign': 'center', 'marginTop': 20}),
     # trigger updates on page load / refresh
+        html.Hr(style={
+    'height': '2px',
+    'backgroundColor': '#cfcfcf',
+    'border': 'none',
+    'width': '90%',
+    'margin': '20px auto'
+    }),
+
+    # line chart with built-in Plotly legend and aggregation selector
+    html.Div([
+        html.Label('Intervallo di somma:'),
+        dcc.Dropdown(id='line-sum-range', options=[
+            {'label': 'Giorno', 'value': 'day'},
+            {'label': 'Settimana', 'value': 'week'},
+            {'label': 'Mese', 'value': 'month'},
+        ], value='month', clearable=False, style={'width': '200px', 'display': 'inline-block', 'marginRight': '12px'}),
+
+        html.Label('Intervallo temporale:'),
+        dcc.Dropdown(id='line-time-window', options=[
+            {'label': 'Da sempre', 'value': 'all_time'},
+            {'label': 'Ultimo anno', 'value': 'last_year'},
+            {'label': 'Ultimi 3 mesi', 'value': 'last_3_months'},
+            {'label': 'Ultimo mese', 'value': 'last_month'},
+        ], value='all_time', clearable=False, style={'width': '220px', 'display': 'inline-block', 'marginRight': '12px'}),
+
+        dcc.Graph(id='line-revenue', style={'width': '100%'}),
+    ], style={'width': '90%', 'margin': 'auto'}),
+
     dcc.Location(id='url', refresh=False),
 ])
 
@@ -230,6 +263,12 @@ from graphs.tortaStati import pie_stato
 @app.callback(Output('pie-stato', 'figure'), Input('url', 'href'))
 def update_pie_chart(_href, df=df):
     return pie_stato(_href, df=df)
+
+from graphs.lineRevenue import line_revenue
+@app.callback(Output('line-revenue', 'figure'), [Input('url', 'href'), Input('line-sum-range', 'value'), Input('line-time-window', 'value')])
+def update_line_chart(_href, sum_range, time_window, df=df):
+    # sum_range can be 'day', 'week', or 'month'
+    return line_revenue(_href, df=df, sum_range=sum_range, time_window=time_window)  # time_window will be handled inside line_revenue later
 
 from graphs.barOpzioni import bar_per_anno
 # new chart: selectable category per year (ARTISTA / IVA / FASCIA PREZZO)
@@ -306,7 +345,6 @@ def update_top10_table(_href, artist, anno, top_n, df=df):
             html.H4("Errore durante il calcolo della Top-N:"),
             html.Pre(tb)
         ])
-
 # 🔹 Callback per aggiornare le opzioni delle dropdown
 @app.callback(
     [Output('colonna-x', 'options'),
@@ -357,4 +395,7 @@ def aggiorna_grafico(col_x, col_y, col_colore):
 # 🔹 Avvio app
 if __name__ == "__main__":
     print("🚀 Avvio server Dash su http://0.0.0.0:10000 ...")
-    app.run (host="0.0.0.0", port=10000)
+    if APP_ENV == "local":
+        app.run(host="0.0.0.0", port=10000,debug=True)
+    else:
+        app.run (host="0.0.0.0", port=10000)

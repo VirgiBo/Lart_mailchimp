@@ -1,7 +1,4 @@
-import pandas as pd
 import plotly.express as px
-from dash import html
-
 
 def pie_stato(_href, df=None):
 
