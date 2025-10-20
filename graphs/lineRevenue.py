@@ -4,22 +4,81 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 
+def _parse_data_anno(row, date_col, anno_col):
+    """Parse a single row's DATA and ANNO columns to produce a datetime.
+    
+    Handles:
+    - YYYY-MM-DD HH:MM:SS (datetime timestamp) → parse directly
+    - dd/mm (day/month, year from ANNO) → combine with year
+    - dd/mm/yy or dd/mm/yyyy → parse all three
+    """
+    try:
+        raw = str(row[date_col]).strip().replace('\u200b', '')
+    except (KeyError, TypeError):
+        return pd.NaT
+    
+    if not raw or raw.lower() in ('nan', 'none', ''):
+        return pd.NaT
+    
+    # Try direct pandas parsing first (handles YYYY-MM-DD HH:MM:SS)
+    try:
+        dt = pd.to_datetime(raw, errors='coerce')
+        if pd.notna(dt):
+            return dt
+    except Exception:
+        pass
+    
+    # Manual parsing for dd/mm or dd/mm/yy formats
+    parts = [p.strip() for p in raw.replace('-', '/').split('/')]
+    parts = [p.split()[0] if p else p for p in parts]  # strip time if attached to any part
+    parts = [p for p in parts if p]  # remove empty strings
+    
+    try:
+        if len(parts) == 2:
+            # Case 1: day/month, year from ANNO
+            day = int(parts[0])
+            month = int(parts[1])
+            year = None
+            try:
+                year = int(float(row[anno_col]))
+            except (ValueError, TypeError, KeyError):
+                pass
+            if year is not None:
+                return pd.Timestamp(year=year, month=month, day=day)
+            else:
+                return pd.NaT
+        elif len(parts) == 3:
+            # Case 2: day/month/year from DATA
+            day = int(parts[0])
+            month = int(parts[1])
+            year_str = parts[2]
+            year = int(year_str) if len(year_str) > 2 else 2000 + int(year_str)
+            return pd.Timestamp(year=year, month=month, day=day)
+        else:
+            #print(f"DEBUG: unexpected parts count {len(parts)} for raw={raw} parts={parts}")
+            return pd.NaT
+    except (ValueError, TypeError) as e:
+        #print(f"DEBUG: Exception parsing raw={raw} parts={parts}: {e}")
+        return pd.NaT
+
+
 def line_revenue(_href, df=None, sum_range='day', time_window="all_time"):
     """Plot singular sells per day.
 
     Parsing rules for `DATA`:
-    - If DATA contains day/month/year (e.g. '31/8/25' or '31/08/2025'), parse directly.
+    - If DATA contains day/month (e.g. '31/08'), year is taken from `ANNO` column.
+    - If DATA contains day/month/year (e.g. '31/8/25' or '31/08/2025'), parse all three.
       Two-digit years are interpreted as 2000+year (e.g. '25' -> 2025).
-    - If DATA contains only day/month (e.g. '31/08') then year is taken from `ANNO` column.
 
     The function returns a Figure with one trace per `place_col` (lighter) and an Overall trace (bold).
-    It also annotates how many rows had unreadable dates and shows a short sample of their ARTISTA/OPERA.
     # time_window can be 'all_time', 'last_year', 'last_3_months', 'last_month'
-
     """
     date_col='DATA'
     anno_col='ANNO'
     place_col='LUOGO DI VENDITA'
+
+    #remove empty date lines
+    df = df[df['DATA'].notna()]
 
     if df is None or df.empty:
         fig = go.Figure()
@@ -28,80 +87,9 @@ def line_revenue(_href, df=None, sum_range='day', time_window="all_time"):
 
     df = df.copy()
 
-    # helper to parse each DATA value
-    parsed_dates = []
-    unreadable = []
-
-    # detect anno column case-insensitively
-    anno_col_found = None
-    for c in df.columns:
-        if str(c).strip().upper() == str(anno_col).strip().upper():
-            anno_col_found = c
-            break
-    if anno_col_found is None:
-        # try any column named like 'ANNO'
-        for c in df.columns:
-            if str(c).strip().upper() == 'ANNO':
-                anno_col_found = c
-                break
-
-    for idx, row in df.iterrows():
-        raw = ''
-        if date_col in df.columns:
-            raw = str(row.get(date_col, '')).strip()
-        raw = raw.replace('\u200b', '').strip()  # remove zero-width if present
-        if not raw or raw.lower() in ('nan', 'none'):
-            parsed_dates.append(pd.NaT)
-            unreadable.append((idx, row))
-            continue
-
-        # try direct pandas parsing first (handles many formats, with dayfirst)
-        try:
-            direct = pd.to_datetime(raw, dayfirst=True, errors='coerce')
-            if pd.notna(direct):
-                parsed_dates.append(direct)
-                continue
-        except Exception:
-            pass
-
-        parts = [p.strip() for p in raw.replace('-', '/').split('/') if p.strip()!='']
-        year_val = None
-        day = None
-        month = None
-        try:
-            if len(parts) == 3:
-                # dd/mm/yy or dd/mm/yyyy
-                day = int(parts[0])
-                month = int(parts[1])
-                y = parts[2]
-                if len(y) <= 2:
-                    year_val = 2000 + int(y)
-                else:
-                    year_val = int(y)
-            elif len(parts) == 2:
-                day = int(parts[0])
-                month = int(parts[1])
-                # take year from ANNO column if available
-                if anno_col_found is not None:
-                    try:
-                        year_val = int(float(row.get(anno_col_found)))
-                    except Exception:
-                        year_val = None
-                else:
-                    year_val = None
-            else:
-                year_val = None
-
-            if year_val is not None and day is not None and month is not None:
-                parsed_dates.append(pd.Timestamp(year=year_val, month=month, day=day))
-            else:
-                parsed_dates.append(pd.NaT)
-                unreadable.append((idx, row))
-        except Exception:
-            parsed_dates.append(pd.NaT)
-            unreadable.append((idx, row))
-
-    df['_date'] = pd.to_datetime(pd.Series(parsed_dates), errors='coerce')
+    # Find ANNO column (case-insensitive lookup not needed here; assumes exact column names)
+    # Parse dates using apply with the helper function
+    df['_date'] = df.apply(lambda row: _parse_data_anno(row, date_col, anno_col), axis=1)
     # filter by time_window if requested
     if time_window != "all_time":
         now = pd.Timestamp.now()
@@ -117,7 +105,7 @@ def line_revenue(_href, df=None, sum_range='day', time_window="all_time"):
         if cutoff is not None:
             df = df[df['_date'] >= cutoff].copy()
 
-    # Before parsing we already parsed dates; collect unreadable info
+    # Collect unreadable date info
     unread_count = int(df['_date'].isna().sum())
     unread_sample = []
     if unread_count > 0:
@@ -126,8 +114,10 @@ def line_revenue(_href, df=None, sum_range='day', time_window="all_time"):
         for _, r in bad.iterrows():
             artista = r.get('ARTISTA', '')
             opera = r.get('OPERA', '')
-            raw_date = r.get(date_col, '') if date_col in df.columns else ''
+            raw_date = r.get(date_col, '')
             unread_sample.append(f"{raw_date} | {artista} | {opera}")
+
+    print(f"[lineRevenue] Total rows: {len(df)}; Rows with readable dates: {len(df) - unread_count}; Unreadable: {unread_count}")
 
     # drop rows without readable date
     dgood = df[df['_date'].notna()].copy()
@@ -155,6 +145,8 @@ def line_revenue(_href, df=None, sum_range='day', time_window="all_time"):
     dgood = dgood[dgood['_price'].notna()].copy()
     dropped_price = before_drop - len(dgood)
 
+    print(f"[lineRevenue] After PREZZO filter: {len(dgood)} rows (dropped {dropped_price} non-numeric)")
+
     if dgood.empty:
         print(f"No valid rows after dropping non-numeric PREZZO. Dropped {dropped_price} rows.")
         fig = go.Figure()
@@ -173,7 +165,7 @@ def line_revenue(_href, df=None, sum_range='day', time_window="all_time"):
         x_title = 'Settimana (inizio)'
         tickfmt = '%Y-%m-%d'
     elif sr == 'month':
-        freq = 'M'
+        freq = 'ME'
         x_title = 'Mese'
         tickfmt = '%Y-%m'
     else:
@@ -200,15 +192,58 @@ def line_revenue(_href, df=None, sum_range='day', time_window="all_time"):
 
     fig = go.Figure()
 
-    # add place traces as lines
+    # add place traces as lines (using datetime index)
     if place_df is not None and not place_df.empty:
+        # ensure index is datetime
+        try:
+            place_index = pd.to_datetime(place_df.index)
+        except Exception:
+            place_index = place_df.index
         for col in place_df.columns:
-            fig.add_trace(go.Scatter(x=place_df.index, y=place_df[col], mode='lines+markers', name=str(col), line=dict(width=1), opacity=0.7))
+            fig.add_trace(go.Scatter(x=place_index, y=place_df[col], mode='lines+markers', name=str(col), line=dict(width=1), opacity=0.7))
 
     # overall bold line
-    # overall['_date'] may be named differently depending on reset_index
+    # overall date column name
     date_col_name = overall.columns[0]
-    fig.add_trace(go.Scatter(x=overall[date_col_name], y=overall['total'], mode='lines+markers', name='Overall', line=dict(width=3, color='black')))
+    overall_x = pd.to_datetime(overall[date_col_name])
+    fig.add_trace(go.Scatter(x=overall_x, y=overall['total'], mode='lines+markers', name='Overall', line=dict(width=3, color='black')))
+
+    # prepare friendly tick labels: month names for month, ordinal weeks for week
+    tickvals = list(overall_x)
+    ticktext = None
+    if sr == 'month':
+        # show month name (e.g., 'August') — include year when multiple years present
+        # use .dt.year on a Series
+        years = overall_x.dt.year.unique() if hasattr(overall_x, 'dt') else pd.DatetimeIndex(overall_x).year.unique()
+        if len(years) > 1:
+            ticktext = [d.strftime('%B %Y') for d in overall_x]
+        else:
+            ticktext = [d.strftime('%B') for d in overall_x]
+    elif sr == 'week':
+        # ordinal week number like '1° Week'
+        ticktext = []
+        for d in overall_x:
+            try:
+                wk = int(d.isocalendar().week)
+            except Exception:
+                # fallback to weekofyear
+                wk = int(d.week)
+            ticktext.append(f"{wk}° Week")
+    else:
+        # day — use ISO date
+        ticktext = [d.strftime('%Y-%m-%d') for d in overall_x]
+
+    # limit number of ticks to avoid overcrowding (keep last tick)
+    max_ticks = 70
+    n_ticks = len(tickvals)
+    if n_ticks > max_ticks:
+        import math
+        step = math.ceil(n_ticks / max_ticks)
+        sel = list(range(0, n_ticks, step))
+        if sel[-1] != n_ticks - 1:
+            sel.append(n_ticks - 1)
+        tickvals = [tickvals[i] for i in sel]
+        ticktext = [ticktext[i] for i in sel]
 
     # print unreadable and drop info to terminal (not on graph)
     print(f"Total rows: {len(df)}; Rows with readable dates: {len(dgood)}; Rows with unreadable dates: {unread_count}")
@@ -220,6 +255,11 @@ def line_revenue(_href, df=None, sum_range='day', time_window="all_time"):
         print(f"Dropped {dropped_price} rows because PREZZO was not numeric.")
 
     sum_range_conv = {'day': 'giorno', 'week': 'settimana', 'month': 'mese'}
-    fig.update_layout(title=f'Vendite {sum_range_conv.get(sr, "giorno")} (somma PREZZO)', xaxis_title=sum_range_conv.get(sr, "giorno"), yaxis_title='PREZZO (somma)', template='plotly_white', legend=dict(orientation='h'))
-    fig.update_xaxes(tickformat='%Y-%m-%d')
+    fig.update_layout(title=f'Vendite {sum_range_conv.get(sr, "giorno")} (somma PREZZO)', xaxis_title=sum_range_conv.get(sr, "giorno"), yaxis_title='PREZZO (somma)', template='plotly_white',
+                      legend=dict(orientation='v', x=1.05, y=0.92, xanchor='right', yanchor='top', bgcolor='rgba(255,255,255,0.6)', bordercolor='rgba(0,0,0,0.1)', borderwidth=1, font=dict(size=10)))
+    # set tickvals/ticktext for friendly labels but keep datetime x values for hover
+    try:
+        fig.update_xaxes(tickvals=tickvals, ticktext=ticktext)
+    except Exception:
+        fig.update_xaxes(tickformat=tickfmt)
     return fig
