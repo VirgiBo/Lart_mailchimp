@@ -165,7 +165,7 @@ def line_revenue(_href, df=None, sum_range='day', time_window="all_time"):
         x_title = 'Settimana (inizio)'
         tickfmt = '%Y-%m-%d'
     elif sr == 'month':
-        freq = 'ME'
+        freq = 'MS'
         x_title = 'Mese'
         tickfmt = '%Y-%m'
     else:
