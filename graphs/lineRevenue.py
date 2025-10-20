@@ -92,7 +92,9 @@ def line_revenue(_href, df=None, sum_range='day', time_window="all_time"):
     df['_date'] = df.apply(lambda row: _parse_data_anno(row, date_col, anno_col), axis=1)
     # filter by time_window if requested
     if time_window != "all_time":
-        now = pd.Timestamp.now()
+        # Use last day of previous month (end of day) to include full current month's first day
+        # This avoids cutting off the first day of the current month
+        now = pd.Timestamp.now().replace(day=1) - pd.Timedelta(hours=25)
         if time_window == "last_year":
             cutoff = now - pd.DateOffset(years=1)
         elif time_window == "last_3_months":
